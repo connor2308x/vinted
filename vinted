@@ -1,0 +1,103 @@
+import requests
+import time
+import json
+from datetime import datetime
+
+SEARCH_URL = "https://www.vinted.co.uk/api/v2/catalog/items"
+
+# ---- CONFIG ----
+SEARCH_PARAMS = {
+    "page": 1,
+    "per_page": 20,
+    "search_text": "nike hoodie",
+    "price_from": 5,
+    "price_to": 30,
+    "currency": "GBP",
+    "status[]": 0
+}
+
+CHECK_INTERVAL = 20
+SEEN_FILE = "seen_items.json"
+DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1445196449490010153/l7z8cY2Qisg1r9hXjMDrU-K4-C-jggaGsGfEa8w17-U4Je9KK_U1i0NeWAh0SO2VGV8r"
+# -----------------
+
+
+def load_seen():
+    try:
+        with open(SEEN_FILE, "r") as f:
+            return set(json.load(f))
+    except:
+        return set()
+
+
+def save_seen(seen):
+    with open(SEEN_FILE, "w") as f:
+        json.dump(list(seen), f)
+
+
+def notify_discord(item):
+    if not DISCORD_WEBHOOK:
+        print("[WARN] No Discord webhook set.")
+        return
+
+    embed = {
+        "title": item["title"],
+        "url": item["url"],
+        "description": f"Price: £{item['price']}\nSize: {item['size']}",
+        "thumbnail": {"url": item["photo"]},
+        "color": 65280
+    }
+
+    data = {"embeds": [embed]}
+    requests.post(DISCORD_WEBHOOK, json=data)
+
+
+def fetch_items():
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+        "Accept-Language": "en-GB,en;q=0.9",
+    }
+    r = requests.get(SEARCH_URL, params=SEARCH_PARAMS, headers=headers)
+    r.raise_for_status()
+    return r.json().get("items", [])
+
+
+
+def main():
+    seen = load_seen()
+    print("[INFO] Discord Vinted monitor started...")
+
+    while True:
+        try:
+            items = fetch_items()
+
+            for item in items:
+                item_id = item["id"]
+
+                if item_id not in seen:
+                    seen.add(item_id)
+
+                    obj = {
+                        "title": item["title"],
+                        "price": item["total_item_price"],
+                        "size": item["size_title"],
+                        "url": f"https://www.vinted.co.uk/items/{item_id}",
+                        "photo": item["photos"][0]["url"]
+                    }
+
+                    print(f"[{datetime.now()}] NEW ITEM: {obj['title']}")
+                    notify_discord(obj)
+
+            save_seen(seen)
+
+        except Exception as e:
+            print("Error:", e)
+
+        time.sleep(CHECK_INTERVAL)
+
+
+if __name__ == "__main__":
+    main()
